@@ -1,0 +1,125 @@
+# Import libraries
+# -------------------------------------------------------------------------------------------
+
+from pyspark.ml import Pipeline
+from pyspark.ml.regression import RandomForestRegressor
+from pyspark.ml.feature import VectorIndexer
+from pyspark.ml.evaluation import RegressionEvaluator
+
+
+# Load Data
+# -------------------------------------------------------------------------------------------
+
+# Load and parse the data file, converting it to a DataFrame.
+filename = "HAMILTON"
+datapath = "Dataset1/" + filename + ".txt"
+filename = filename.capitalize()
+data = spark.read.format("libsvm").load(datapath)
+
+
+# Feature Indexer
+# -------------------------------------------------------------------------------------------
+
+# Automatically identify categorical features, and index them.
+# Set maxCategories so features with > 24 distinct values are treated as continuous.
+featureIndexer = VectorIndexer(inputCol="features", outputCol="indexedFeatures", maxCategories=25).fit(data)
+
+
+# Split Data
+# -------------------------------------------------------------------------------------------
+
+# Split the data into training and test sets (25% held out for testing)
+row_count = data.count()
+head_count = int(row_count * 0.75)
+tail_count = row_count - head_count
+
+trainingData = data.limit(head_count)
+testDataList = data.tail(tail_count)
+testData = spark.createDataFrame(testDataList)
+
+
+# Random Forest
+# -------------------------------------------------------------------------------------------
+
+# Train a RandomForest model.
+rf = RandomForestRegressor(featuresCol="indexedFeatures", maxBins=25)
+
+# Chain indexer and forest in a Pipeline
+pipeline = Pipeline(stages=[featureIndexer, rf])
+
+# Train model.  This also runs the indexer.
+model = pipeline.fit(trainingData)
+
+# Make predictions.
+predictions = model.transform(testData)
+
+
+
+# RMSE Evaluation
+# -------------------------------------------------------------------------------------------
+
+# Select (prediction, true label) and compute test error
+evaluator = RegressionEvaluator(labelCol="label", predictionCol="prediction", metricName="rmse")
+rmse = evaluator.evaluate(predictions)
+print("Root Mean Squared Error (RMSE) on test data = %g" % rmse)
+
+
+# Plot predictions vs actual
+# -------------------------------------------------------------------------------------------
+
+import matplotlib.pyplot as plt
+
+y_vals1 = [val.prediction for val in predictions.select('prediction').collect()]
+y_vals2 = [val.label for val in predictions.select('label').collect()]
+x_vals = range(1,predictions.count() + 1,1)
+
+# Optional reduction of points to plot for visibility
+y_vals1 = y_vals1[:300]
+y_vals2 = y_vals2[:300]
+x_vals = x_vals[:300]
+
+plt.figure(figsize=(20, 8))
+plt.plot(x_vals, y_vals1, marker='o', linestyle='-', markersize=2, linewidth=1, label='Predicted', color='b')
+plt.plot(x_vals, y_vals2, marker='o', linestyle='-', markersize=2, linewidth=1, label='Actual', color='r')
+
+plt.ylabel('Energy (kWh)')
+plt.xlabel('Index')
+plt.title(filename +' Station - Random Forest - Predictions vs. Actual Values on a Subset of Data')
+plt.legend(loc='upper left')
+
+try:
+    os.mkdir('./visualisations/Actual_Prediction_Plots')
+except FileExistsError:
+    pass
+
+newfile = 'visualisations/Actual_Prediction_Plots/Actual_Prediction_Plot_RF_' + filename
+plt.savefig(newfile)
+
+
+# Plot rounded difference histogram
+# -------------------------------------------------------------------------------------------
+
+y_vals1 = [val.prediction for val in predictions.select('prediction').collect()]
+y_vals2 = [val.label for val in predictions.select('label').collect()]
+
+y_difference = []
+i = 0
+while i < len(y_vals2):
+    y_difference.append(y_vals1[i] - y_vals2[i])
+    i = i + 1
+
+plt.figure(figsize=(20, 8))
+plt.hist(y_difference, range=(-10.5,10.5), bins=21, color='lightgreen')
+
+plt.ylabel('Count')
+plt.xlabel('Error (kWh)')
+plt.title(filename +' Station - Random Forest - Rounded Prediction Error Histogram')
+plt.legend(loc='upper left')
+
+try:
+    os.mkdir('./visualisations/Error_Histograms')
+except FileExistsError:
+    pass
+
+newfile = 'visualisations/Error_Histograms/Error_Histogram_RF_' + filename
+plt.savefig(newfile)

@@ -1,0 +1,42 @@
+-- Run commands before ativating hive
+-- rm -r metastore_db/
+-- $HIVE_HOME/bin/schematool -dbType derby -initSchema
+
+------------------------------------------------------------------
+-- Create database for project
+CREATE DATABASE IF NOT EXISTS CA4022;
+
+-- Specify the database to use
+USE CA4022;
+
+-- Remove table if exists
+DROP TABLE IF EXISTS full_table;
+
+------------------------------------------------------------------
+-- Create table full_table
+CREATE TABLE IF NOT EXISTS full_table(
+Station_Name string, Start_Date string, Charging_Time string, Energy double, Station_Cluster_Name string)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ',';
+
+------------------------------------------------------------------
+-- Load data into full_table
+LOAD DATA LOCAL INPATH 'clean_data/Processed_Dataset/*' INTO TABLE full_table;
+
+------------------------------------------------------------------
+-- 1. Station Row Count Query
+INSERT OVERWRITE LOCAL DIRECTORY './queries/charges_per_station' 
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' 
+SELECT Station_Name, COUNT(Station_Name) AS Count_Station
+FROM full_table
+GROUP BY Station_Name
+ORDER BY Count_Station DESC;
+
+------------------------------------------------------------------
+-- 2. Cluster Station Row Count Query
+INSERT OVERWRITE LOCAL DIRECTORY './queries/charges_per_station_cluster' 
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+SELECT Station_Cluster_Name, COUNT(Station_Cluster_Name) AS Count_Station
+FROM full_table
+GROUP BY Station_Cluster_Name
+ORDER BY Count_Station DESC;
